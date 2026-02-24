@@ -3,13 +3,19 @@
 @tailwind utilities;
 
 :root {
-  --background: #0a0e17;
+  --background: #000000;
 }
 
 body {
   background: var(--background);
   color: #e5e7eb;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Selection color */
+::selection {
+  background: rgba(255, 0, 0, 0.3);
+  color: #fff;
 }
 
 /* Custom scrollbar */
@@ -30,15 +36,15 @@ body {
   background: rgba(255, 255, 255, 0.2);
 }
 
-/* Background grid pattern */
+/* Background grid pattern - subtle on pure black */
 .bg-grid {
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
   background-size: 40px 40px;
 }
 
-/* Gradient glow */
-.glow-emerald {
-  box-shadow: 0 0 60px rgba(16, 185, 129, 0.08), 0 0 120px rgba(6, 182, 212, 0.04);
+/* Gradient glow - YouTube red accent */
+.glow-red {
+  box-shadow: 0 0 60px rgba(255, 0, 0, 0.06), 0 0 120px rgba(255, 0, 0, 0.03);
 }

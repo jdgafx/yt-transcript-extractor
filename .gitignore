@@ -41,3 +41,6 @@ next-env.d.ts
 
 # temp extraction files
 /tmp/
+
+# Local Netlify folder
+.netlify

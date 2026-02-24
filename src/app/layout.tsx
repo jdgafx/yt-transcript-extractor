@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "YT Transcript Extractor",
-  description: "Extract transcripts from YouTube videos and channels. Export to Markdown, PDF, or Word.",
+  title: "YouTube Transcript Auto-Extractor",
+  description: "Extract transcripts from any YouTube video or channel automatically. Export to Markdown, PDF, or Word.",
 };
 
 export default function RootLayout({

@@ -168,23 +168,26 @@ export default function Home() {
   return (
     <main className="min-h-screen flex flex-col">
       {/* Header */}
-      <header className="border-b border-gray-800/50">
+      <header className="border-b border-white/5">
         <div className="max-w-4xl mx-auto px-6 py-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center shadow-lg shadow-emerald-500/20">
-              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4V2m0 2a2 2 0 012 2v12a2 2 0 01-2 2m0-16a2 2 0 00-2 2v12a2 2 0 002 2m0 0h12a2 2 0 002-2V6a2 2 0 00-2-2H7zm4 4h6m-6 4h6m-6 4h3" />
+            {/* Real YouTube Play Button Logo */}
+            <div className="w-12 h-8 rounded-lg bg-[#FF0000] flex items-center justify-center shadow-lg shadow-red-500/30">
+              <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M8 5v14l11-7z" />
               </svg>
             </div>
             <div>
-              <h1 className="text-xl font-bold text-white">YT Transcript Extractor</h1>
+              <h1 className="text-xl font-bold text-white tracking-tight">
+                YouTube Transcript <span className="text-[#FF0000]">Auto-Extractor</span>
+              </h1>
               <p className="text-xs text-gray-500">Extract transcripts from any YouTube video or channel</p>
             </div>
           </div>
           {phase !== "idle" && (
             <button
               onClick={handleReset}
-              className="px-4 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-white bg-gray-800/50 hover:bg-gray-800 border border-gray-700/50 transition-all"
+              className="px-4 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 transition-all"
             >
               Start Over
             </button>
@@ -198,8 +201,8 @@ export default function Home() {
           {/* Hero section (only when idle) */}
           {phase === "idle" && (
             <div className="text-center space-y-3 mb-4">
-              <h2 className="text-3xl font-bold bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-400 bg-clip-text text-transparent">
-                Extract YouTube Transcripts
+              <h2 className="text-3xl font-bold text-white">
+                Extract <span className="text-[#FF0000]">YouTube</span> Transcripts
               </h2>
               <p className="text-gray-400 text-lg max-w-2xl mx-auto">
                 Paste a video or channel URL to extract transcripts. Download as Markdown, PDF, or Word.
@@ -208,7 +211,7 @@ export default function Home() {
           )}
 
           {/* Form */}
-          <div className="glow-emerald rounded-2xl border border-gray-800/50 bg-gray-900/40 backdrop-blur-sm p-6">
+          <div className="glow-red rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-sm p-6">
             <ExtractorForm
               onSubmit={handleSubmit}
               disabled={phase === "fetching-channel" || phase === "extracting"}
@@ -217,7 +220,7 @@ export default function Home() {
 
           {/* Progress */}
           {phase !== "idle" && (
-            <div className="rounded-2xl border border-gray-800/50 bg-gray-900/40 backdrop-blur-sm p-6">
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-sm p-6">
               <ProgressDisplay
                 phase={phase}
                 completed={completed}
@@ -231,7 +234,7 @@ export default function Home() {
 
           {/* Download buttons */}
           {phase === "done" && results.length > 0 && (
-            <div className="rounded-2xl border border-gray-800/50 bg-gray-900/40 backdrop-blur-sm p-6">
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-sm p-6">
               <DownloadButtons results={results} sourceLabel={sourceLabel} />
             </div>
           )}
@@ -239,10 +242,10 @@ export default function Home() {
       </div>
 
       {/* Footer */}
-      <footer className="border-t border-gray-800/50 py-6">
+      <footer className="border-t border-white/5 py-6">
         <div className="max-w-4xl mx-auto px-6 flex items-center justify-between text-sm text-gray-600">
-          <p>Built by Christopher Gentile / NewDawn AI</p>
-          <p>Powered by yt-dlp</p>
+          <p>Built by <span className="text-gray-400">Christopher Gentile</span> / <span className="text-[#FF0000]">NewDawn AI</span></p>
+          <p>Powered by <span className="text-gray-400">yt-dlp</span></p>
         </div>
       </footer>
     </main>
