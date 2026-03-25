@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { extractTranscript, getVideoTitle, type TranscriptResult, type VideoInfo } from "@/lib/yt-dlp";
+import { extractTranscript, getVideoTitle, type TranscriptResult, type VideoInfo } from "@/lib/youtube";
 
 export const maxDuration = 300; // 5 minutes for Vercel/Netlify
 

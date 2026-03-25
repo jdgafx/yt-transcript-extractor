@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { TranscriptResult } from "@/lib/yt-dlp";
+import type { TranscriptResult } from "@/lib/youtube";
 
 interface DownloadButtonsProps {
   results: TranscriptResult[];

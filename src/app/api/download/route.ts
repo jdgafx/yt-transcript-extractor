@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateMarkdown, generatePdf, generateDocx } from "@/lib/exporters";
-import type { TranscriptResult } from "@/lib/yt-dlp";
+import type { TranscriptResult } from "@/lib/youtube";
 
 export async function POST(request: NextRequest) {
   try {

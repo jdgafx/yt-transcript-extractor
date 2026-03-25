@@ -14,6 +14,12 @@ export default function ExtractorForm({ onSubmit, disabled }: ExtractorFormProps
     const trimmed = input.trim();
     if (!trimmed) return null;
 
+    const videoPatterns = [
+      /youtube\.com\/watch\?v=[\w-]{11}/i,
+      /youtu\.be\/[\w-]{11}/i,
+      /youtube\.com\/shorts\/[\w-]{11}/i,
+    ];
+    const playlistPatterns = [/youtube\.com\/playlist\?list=[\w-]+/i];
     const channelPatterns = [
       /youtube\.com\/@[\w.-]+/i,
       /youtube\.com\/channel\/[\w-]+/i,
@@ -21,14 +27,11 @@ export default function ExtractorForm({ onSubmit, disabled }: ExtractorFormProps
       /youtube\.com\/user\/[\w.-]+/i,
     ];
 
-    const videoPatterns = [
-      /youtube\.com\/watch\?v=[\w-]{11}/i,
-      /youtu\.be\/[\w-]{11}/i,
-      /youtube\.com\/shorts\/[\w-]{11}/i,
-    ];
-
     for (const p of videoPatterns) {
       if (p.test(trimmed)) return "video";
+    }
+    for (const p of playlistPatterns) {
+      if (p.test(trimmed)) return "playlist";
     }
     for (const p of channelPatterns) {
       if (p.test(trimmed)) return "channel";
@@ -74,6 +77,14 @@ export default function ExtractorForm({ onSubmit, disabled }: ExtractorFormProps
                 Channel
               </span>
             )}
+            {type === "playlist" && (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-purple-500/20 text-purple-400 border border-purple-500/30">
+                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M2 3.75A.75.75 0 012.75 3h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 3.75zm0 4.167a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75zm0 4.166a.75.75 0 01.75-.75h9.5a.75.75 0 010 1.5h-9.5a.75.75 0 01-.75-.75zm13-1.416a.75.75 0 011.5 0v3.5a.75.75 0 01-1.5 0v-3.5z" clipRule="evenodd" />
+                </svg>
+                Playlist
+              </span>
+            )}
             {!type && (
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-red-500/20 text-red-400 border border-red-500/30">
                 Unknown URL
@@ -102,9 +113,9 @@ export default function ExtractorForm({ onSubmit, disabled }: ExtractorFormProps
           )}
         </button>
 
-        {type === "channel" && !disabled && (
+        {(type === "channel" || type === "playlist") && !disabled && (
           <p className="text-sm text-gray-400">
-            This will fetch all videos from the channel and extract transcripts sequentially.
+            This will fetch all videos from the {type} and extract transcripts sequentially.
           </p>
         )}
       </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import type { TranscriptResult } from "@/lib/yt-dlp";
+import type { TranscriptResult } from "@/lib/youtube";
 
 interface ProgressDisplayProps {
   phase: "idle" | "fetching-channel" | "extracting" | "done" | "error";

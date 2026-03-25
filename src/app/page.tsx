@@ -25,8 +25,9 @@ export default function Home() {
   const [sourceLabel, setSourceLabel] = useState("");
   const abortRef = useRef<AbortController | null>(null);
 
-  const detectType = (input: string): "video" | "channel" | null => {
+  const detectType = (input: string): "video" | "channel" | "playlist" | null => {
     if (/youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\//i.test(input)) return "video";
+    if (/youtube\.com\/playlist\?list=/i.test(input)) return "playlist";
     if (/youtube\.com\/@|youtube\.com\/channel\/|youtube\.com\/c\/|youtube\.com\/user\//i.test(input)) return "channel";
     return null;
   };
@@ -60,27 +61,27 @@ export default function Home() {
     try {
       let videos: { id: string; title: string }[] = [];
 
-      if (type === "channel") {
+      if (type === "channel" || type === "playlist") {
         setPhase("fetching-channel");
         setSourceLabel(url);
 
         const res = await fetch("/api/channel-videos", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url }),
+          body: JSON.stringify({ url, type }),
           signal: abortRef.current.signal,
         });
 
         if (!res.ok) {
           const data = await res.json();
-          throw new Error(data.error || "Failed to fetch channel videos");
+          throw new Error(data.error || "Failed to fetch videos");
         }
 
         const data = await res.json();
         videos = data.videos;
 
         if (videos.length === 0) {
-          throw new Error("No videos found on this channel");
+          throw new Error("No videos found");
         }
       } else {
         const videoId = extractVideoId(url);
@@ -245,7 +246,7 @@ export default function Home() {
       <footer className="border-t border-white/5 py-6">
         <div className="max-w-4xl mx-auto px-6 flex items-center justify-between text-sm text-gray-600">
           <p>Built by <span className="text-gray-400">Christopher Gentile</span> / <span className="text-[#FF0000]">NewDawn AI</span></p>
-          <p>Powered by <span className="text-gray-400">yt-dlp</span></p>
+          <p>Powered by <span className="text-gray-400">YouTube API</span></p>
         </div>
       </footer>
     </main>

@@ -1,6 +1,6 @@
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from "docx";
 import { jsPDF } from "jspdf";
-import type { TranscriptResult } from "./yt-dlp";
+import type { TranscriptResult } from "./youtube";
 
 // ---------------------------------------------------------------------------
 // Markdown
