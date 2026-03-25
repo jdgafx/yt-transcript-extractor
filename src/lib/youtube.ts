@@ -31,17 +31,6 @@ const INNERTUBE_CONTEXT = {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function decodeHtmlEntities(s: string): string {
-  return s
-    .replace(/&#39;/g, "'")
-    .replace(/&quot;/g, '"')
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&#\d+;/g, (m) => String.fromCharCode(parseInt(m.slice(2, -1), 10)));
-}
-
 /** Recursively extract video renderers from any YouTube API blob. */
 function extractVideos(data: unknown): VideoInfo[] {
   const videos: VideoInfo[] = [];
@@ -246,87 +235,31 @@ export async function getVideoTitle(videoId: string): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// Transcript extraction via Android innertube player API
+// Transcript extraction via Cloudflare Worker proxy
+// (YouTube blocks AWS Lambda / serverless IPs — Cloudflare edge IPs work)
 // ---------------------------------------------------------------------------
 
-const IOS_UA = "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X)";
-const IOS_CLIENT = { clientName: "IOS", clientVersion: "20.10.4" };
+const TRANSCRIPT_PROXY = "https://yt-transcript-proxy.cgdarkstardev1-6e1.workers.dev";
 
 export async function extractTranscript(
   videoId: string
 ): Promise<{ transcript: string | null; error?: string }> {
   try {
-    const playerRes = await fetch(
-      `https://www.youtube.com/youtubei/v1/player?key=${INNERTUBE_KEY}&prettyPrint=false`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "User-Agent": IOS_UA },
-        body: JSON.stringify({
-          context: { client: IOS_CLIENT },
-          videoId,
-        }),
-      }
-    );
+    const res = await fetch(TRANSCRIPT_PROXY, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ videoId }),
+    });
 
-    if (!playerRes.ok) return { transcript: null, error: `Player API HTTP ${playerRes.status}` };
-
-    const player = await playerRes.json();
-
-    if (player?.playabilityStatus?.status !== "OK") {
-      return { transcript: null, error: player?.playabilityStatus?.reason || "Video unavailable" };
+    if (!res.ok) {
+      return { transcript: null, error: `Proxy HTTP ${res.status}` };
     }
 
-    const tracks = player?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-    if (!tracks || tracks.length === 0) {
-      return { transcript: null, error: "No captions available" };
-    }
-
-    // Prefer manual English, then any English, then first available
-    const track =
-      tracks.find((t: any) => t.languageCode === "en" && t.kind !== "asr") ??
-      tracks.find((t: any) => t.languageCode === "en") ??
-      tracks.find((t: any) => t.languageCode?.startsWith("en")) ??
-      tracks[0];
-
-    if (!track?.baseUrl) return { transcript: null, error: "No caption URL found" };
-
-    // Fetch the timedtext XML
-    const captionRes = await fetch(track.baseUrl, { headers: { "User-Agent": UA } });
-    if (!captionRes.ok) return { transcript: null, error: "Failed to fetch captions" };
-
-    const xml = await captionRes.text();
-    if (!xml) return { transcript: null, error: "Empty caption response" };
-
-    // Parse captions — try new <p> format first, fall back to <text> format
-    const segments: string[] = [];
-
-    const pRegex = /<p\s+t="\d+"\s+d="\d+"[^>]*>([\s\S]*?)<\/p>/g;
-    let m: RegExpExecArray | null;
-    while ((m = pRegex.exec(xml)) !== null) {
-      let text = "";
-      const sRegex = /<s[^>]*>([^<]*)<\/s>/g;
-      let s: RegExpExecArray | null;
-      while ((s = sRegex.exec(m[1])) !== null) text += s[1];
-      if (!text) text = m[1].replace(/<[^>]+>/g, "");
-      text = decodeHtmlEntities(text).trim();
-      if (text) segments.push(text);
-    }
-
-    // Fallback to old <text> format
-    if (segments.length === 0) {
-      const textRegex = /<text[^>]*>([\s\S]*?)<\/text>/g;
-      while ((m = textRegex.exec(xml)) !== null) {
-        const cleaned = decodeHtmlEntities(m[1].replace(/<[^>]+>/g, "").replace(/\n/g, " ")).trim();
-        if (cleaned) segments.push(cleaned);
-      }
-    }
-
-    const transcript = segments.join(" ").replace(/\s{2,}/g, " ").trim();
-    if (transcript.length < 10) {
-      return { transcript: null, error: "Transcript too short or empty" };
-    }
-
-    return { transcript };
+    const data = await res.json();
+    return {
+      transcript: data.transcript || null,
+      error: data.error,
+    };
   } catch (err) {
     return {
       transcript: null,
