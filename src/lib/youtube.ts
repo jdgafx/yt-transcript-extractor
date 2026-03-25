@@ -27,6 +27,10 @@ const INNERTUBE_CONTEXT = {
   client: { clientName: "WEB", clientVersion: "2.20250301.00.00", hl: "en", gl: "US" },
 };
 
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -109,18 +113,25 @@ function findContinuationTokens(data: unknown): string[] {
   return [...new Set(tokens)];
 }
 
-/** POST to innertube browse API. */
-async function innertubeBrowse(body: Record<string, unknown>): Promise<any> {
-  const res = await fetch(
-    `https://www.youtube.com/youtubei/v1/browse?key=${INNERTUBE_KEY}&prettyPrint=false`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "User-Agent": UA },
-      body: JSON.stringify({ context: INNERTUBE_CONTEXT, ...body }),
+/** POST to innertube browse API with retry. */
+async function innertubeBrowse(body: Record<string, unknown>, retries = 2): Promise<any> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(
+        `https://www.youtube.com/youtubei/v1/browse?key=${INNERTUBE_KEY}&prettyPrint=false`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "User-Agent": UA },
+          body: JSON.stringify({ context: INNERTUBE_CONTEXT, ...body }),
+        }
+      );
+      if (res.ok) return res.json();
+      if (attempt < retries) await sleep(1000 * (attempt + 1));
+    } catch {
+      if (attempt < retries) await sleep(1000 * (attempt + 1));
     }
-  );
-  if (!res.ok) throw new Error(`Innertube API HTTP ${res.status}`);
-  return res.json();
+  }
+  throw new Error("Innertube API failed after retries");
 }
 
 /** Fetch a continuation page. */
@@ -164,41 +175,55 @@ async function resolveChannelId(channelUrl: string): Promise<string> {
     ""
   );
 
-  const res = await fetch(
-    `https://www.youtube.com/youtubei/v1/navigation/resolve_url?key=${INNERTUBE_KEY}&prettyPrint=false`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "User-Agent": UA },
-      body: JSON.stringify({ context: INNERTUBE_CONTEXT, url }),
-    }
-  );
-
-  if (!res.ok) throw new Error(`Failed to resolve channel: HTTP ${res.status}`);
-  const data = await res.json();
-  const browseId = data?.endpoint?.browseEndpoint?.browseId;
-  if (!browseId) throw new Error("Could not resolve channel URL");
-  return browseId;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(
+        `https://www.youtube.com/youtubei/v1/navigation/resolve_url?key=${INNERTUBE_KEY}&prettyPrint=false`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "User-Agent": UA },
+          body: JSON.stringify({ context: INNERTUBE_CONTEXT, url }),
+        }
+      );
+      if (!res.ok) { await sleep(1000); continue; }
+      const data = await res.json();
+      const browseId = data?.endpoint?.browseEndpoint?.browseId;
+      if (browseId) return browseId;
+    } catch {}
+    await sleep(1000);
+  }
+  throw new Error("Could not resolve channel URL");
 }
 
 // ---------------------------------------------------------------------------
-// Channel videos (pure innertube JSON API — no HTML scraping)
+// Channel videos — retry up to 3 times, keep best result
 // ---------------------------------------------------------------------------
 
 export async function fetchChannelVideos(channelUrl: string): Promise<VideoInfo[]> {
   const browseId = await resolveChannelId(channelUrl);
 
-  // params "EgZ2aWRlb3PyBgQKAjoA" = Videos tab, sorted by date
-  const data = await innertubeBrowse({
-    browseId,
-    params: "EgZ2aWRlb3PyBgQKAjoA",
-  });
+  let bestResult: VideoInfo[] = [];
 
-  const allVideos = await collectAllVideos(data);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const data = await innertubeBrowse({
+        browseId,
+        params: "EgZ2aWRlb3PyBgQKAjoA",
+      });
+      const videos = await collectAllVideos(data);
+      if (videos.length > bestResult.length) {
+        bestResult = videos;
+      }
+      // If we got a good result, stop retrying
+      if (bestResult.length >= 20) break;
+    } catch {}
+    if (attempt < 2) await sleep(1500);
+  }
 
-  if (allVideos.length === 0) {
+  if (bestResult.length === 0) {
     throw new Error("No videos found on this channel");
   }
-  return allVideos;
+  return bestResult;
 }
 
 // ---------------------------------------------------------------------------
@@ -236,7 +261,7 @@ export async function getVideoTitle(videoId: string): Promise<string> {
 
 // ---------------------------------------------------------------------------
 // Transcript extraction via Cloudflare Worker proxy
-// (YouTube blocks AWS Lambda / serverless IPs — Cloudflare edge IPs work)
+// Retries with exponential backoff on failure/rate-limiting
 // ---------------------------------------------------------------------------
 
 const TRANSCRIPT_PROXY = "https://yt-transcript-proxy.cgdarkstardev1-6e1.workers.dev";
@@ -244,26 +269,48 @@ const TRANSCRIPT_PROXY = "https://yt-transcript-proxy.cgdarkstardev1-6e1.workers
 export async function extractTranscript(
   videoId: string
 ): Promise<{ transcript: string | null; error?: string }> {
-  try {
-    const res = await fetch(TRANSCRIPT_PROXY, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ videoId }),
-    });
+  const maxRetries = 3;
 
-    if (!res.ok) {
-      return { transcript: null, error: `Proxy HTTP ${res.status}` };
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const res = await fetch(TRANSCRIPT_PROXY, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ videoId }),
+      });
+
+      if (!res.ok) {
+        // Rate limited or server error — wait and retry
+        if (attempt < maxRetries - 1) {
+          await sleep(3000 * (attempt + 1));
+          continue;
+        }
+        return { transcript: null, error: `Proxy HTTP ${res.status}` };
+      }
+
+      const data = await res.json();
+
+      // If the Worker itself reports a rate limit error, retry
+      if (data.error && /429|rate|bot|too many/i.test(data.error) && attempt < maxRetries - 1) {
+        await sleep(4000 * (attempt + 1));
+        continue;
+      }
+
+      return {
+        transcript: data.transcript || null,
+        error: data.error,
+      };
+    } catch (err) {
+      if (attempt < maxRetries - 1) {
+        await sleep(2000 * (attempt + 1));
+        continue;
+      }
+      return {
+        transcript: null,
+        error: err instanceof Error ? err.message : "Transcript extraction failed",
+      };
     }
-
-    const data = await res.json();
-    return {
-      transcript: data.transcript || null,
-      error: data.error,
-    };
-  } catch (err) {
-    return {
-      transcript: null,
-      error: err instanceof Error ? err.message : "Transcript extraction failed",
-    };
   }
+
+  return { transcript: null, error: "Failed after retries" };
 }

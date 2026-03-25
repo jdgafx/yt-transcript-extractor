@@ -89,7 +89,7 @@ export async function POST(request: NextRequest) {
 
           // Delay between requests
           if (i < videos.length - 1) {
-            await new Promise((r) => setTimeout(r, 4000));
+            await new Promise((r) => setTimeout(r, 5000));
           }
         }
 
