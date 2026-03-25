@@ -90,59 +90,50 @@ export default function Home() {
         setSourceLabel(url);
       }
 
-      // Start extraction
+      // Start extraction — one video at a time to avoid function timeouts
       setPhase("extracting");
       setTotal(videos.length);
 
-      const res = await fetch("/api/extract", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ videos }),
-        signal: abortRef.current.signal,
-      });
+      for (let i = 0; i < videos.length; i++) {
+        if (abortRef.current?.signal.aborted) break;
 
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.message || "Extraction failed");
-      }
+        const video = videos[i];
+        setCurrentVideo(video.title);
 
-      // Read NDJSON stream
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No response body");
+        try {
+          const res = await fetch("/api/extract", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ videoId: video.id, title: video.title }),
+            signal: abortRef.current.signal,
+          });
 
-      const decoder = new TextDecoder();
-      let buffer = "";
+          if (res.ok) {
+            const result = await res.json();
+            setResults((prev) => [...prev, result]);
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const msg = JSON.parse(line);
-            if (msg.type === "progress") {
-              setCompleted(msg.completed);
-              setResults((prev) => [...prev, msg.result]);
-              setCurrentVideo(msg.result.title);
-
-              // Update source label for single video
-              if (videos.length === 1 && msg.result.title !== "Unknown") {
-                setSourceLabel(msg.result.title);
-              }
-            } else if (msg.type === "done") {
-              setPhase("done");
-            } else if (msg.type === "error") {
-              throw new Error(msg.message);
+            if (videos.length === 1 && result.title !== "Unknown") {
+              setSourceLabel(result.title);
             }
-          } catch (e) {
-            if (e instanceof SyntaxError) continue;
-            throw e;
+          } else {
+            setResults((prev) => [
+              ...prev,
+              { videoId: video.id, title: video.title, url: `https://www.youtube.com/watch?v=${video.id}`, transcript: null, error: "Request failed" },
+            ]);
           }
+        } catch (err) {
+          if (err instanceof DOMException && err.name === "AbortError") break;
+          setResults((prev) => [
+            ...prev,
+            { videoId: video.id, title: video.title, url: `https://www.youtube.com/watch?v=${video.id}`, transcript: null, error: "Network error" },
+          ]);
+        }
+
+        setCompleted(i + 1);
+
+        // Delay between requests to avoid rate limiting
+        if (i < videos.length - 1) {
+          await new Promise((r) => setTimeout(r, 3000));
         }
       }
 

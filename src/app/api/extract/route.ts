@@ -1,118 +1,48 @@
 import { NextRequest } from "next/server";
-import { extractTranscript, getVideoTitle, type TranscriptResult, type VideoInfo } from "@/lib/youtube";
-
-export const maxDuration = 300; // 5 minutes for Vercel/Netlify
+import { extractTranscript, getVideoTitle, type TranscriptResult } from "@/lib/youtube";
 
 /**
  * POST /api/extract
- * Body: { videos: VideoInfo[] }
+ * Body: { videoId: string, title?: string }
  *
- * Streams progress as newline-delimited JSON (NDJSON).
- * Each line is either:
- *   { type: "progress", completed, total, result: TranscriptResult }
- *   { type: "done", results: TranscriptResult[] }
- *   { type: "error", message: string }
+ * Extracts transcript for a SINGLE video (keeps each request fast,
+ * avoids Netlify's 26s function timeout).
  */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    let videos: VideoInfo[] = body.videos;
+    const { videoId, title } = body as { videoId: string; title?: string };
 
-    if (!videos || !Array.isArray(videos) || videos.length === 0) {
+    if (!videoId || typeof videoId !== "string") {
       return new Response(
-        JSON.stringify({ type: "error", message: "No videos provided" }),
+        JSON.stringify({ error: "Missing videoId" }),
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
     }
 
-    // For single video where we may not have the title yet
-    for (const v of videos) {
-      if (!v.title || v.title === "Unknown") {
-        v.title = await getVideoTitle(`https://www.youtube.com/watch?v=${v.id}`);
-      }
+    // Resolve title if needed
+    let videoTitle = title || "Unknown";
+    if (videoTitle === "Unknown") {
+      videoTitle = await getVideoTitle(videoId);
     }
 
-    const encoder = new TextEncoder();
-    const results: TranscriptResult[] = [];
+    const { transcript, error } = await extractTranscript(videoId);
 
-    const stream = new ReadableStream({
-      async start(controller) {
-        for (let i = 0; i < videos.length; i++) {
-          const video = videos[i];
-          const url = `https://www.youtube.com/watch?v=${video.id}`;
+    const result: TranscriptResult = {
+      videoId,
+      title: videoTitle,
+      url: `https://www.youtube.com/watch?v=${videoId}`,
+      transcript,
+      error,
+    };
 
-          try {
-            const { transcript, error } = await extractTranscript(video.id);
-
-            const result: TranscriptResult = {
-              videoId: video.id,
-              title: video.title,
-              url,
-              transcript,
-              error,
-            };
-
-            results.push(result);
-
-            controller.enqueue(
-              encoder.encode(
-                JSON.stringify({
-                  type: "progress",
-                  completed: i + 1,
-                  total: videos.length,
-                  result,
-                }) + "\n"
-              )
-            );
-          } catch (err) {
-            const result: TranscriptResult = {
-              videoId: video.id,
-              title: video.title,
-              url,
-              transcript: null,
-              error: err instanceof Error ? err.message : "Extraction failed",
-            };
-
-            results.push(result);
-
-            controller.enqueue(
-              encoder.encode(
-                JSON.stringify({
-                  type: "progress",
-                  completed: i + 1,
-                  total: videos.length,
-                  result,
-                }) + "\n"
-              )
-            );
-          }
-
-          // Delay between requests
-          if (i < videos.length - 1) {
-            await new Promise((r) => setTimeout(r, 5000));
-          }
-        }
-
-        controller.enqueue(
-          encoder.encode(
-            JSON.stringify({ type: "done", results }) + "\n"
-          )
-        );
-        controller.close();
-      },
-    });
-
-    return new Response(stream, {
-      headers: {
-        "Content-Type": "application/x-ndjson",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-      },
+    return new Response(JSON.stringify(result), {
+      headers: { "Content-Type": "application/json" },
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Extraction failed";
     return new Response(
-      JSON.stringify({ type: "error", message }),
+      JSON.stringify({ error: message }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }
