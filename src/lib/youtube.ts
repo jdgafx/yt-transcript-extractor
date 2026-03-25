@@ -2,7 +2,7 @@
  * Pure JS YouTube client — no system dependencies (no yt-dlp).
  * Works on Netlify, Vercel, or any serverless environment.
  *
- * Uses YouTube's innertube API and timedtext API directly via fetch.
+ * Uses YouTube's innertube JSON API directly — no HTML scraping.
  */
 
 export interface VideoInfo {
@@ -30,50 +30,6 @@ const INNERTUBE_CONTEXT = {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Extract a JSON object from HTML by finding the variable assignment
- * and counting braces. Much faster and safer than regex on ~1MB HTML.
- */
-function extractJsonFromHtml(html: string, varName: string): any {
-  const needle = `var ${varName} = `;
-  const start = html.indexOf(needle);
-  if (start === -1) return null;
-
-  const jsonStart = start + needle.length;
-  let depth = 0;
-  let inString = false;
-  let escape = false;
-
-  for (let i = jsonStart; i < html.length; i++) {
-    const ch = html[i];
-    if (escape) {
-      escape = false;
-      continue;
-    }
-    if (ch === "\\") {
-      escape = true;
-      continue;
-    }
-    if (ch === '"') {
-      inString = !inString;
-      continue;
-    }
-    if (inString) continue;
-    if (ch === "{") depth++;
-    else if (ch === "}") {
-      depth--;
-      if (depth === 0) {
-        try {
-          return JSON.parse(html.slice(jsonStart, i + 1));
-        } catch {
-          return null;
-        }
-      }
-    }
-  }
-  return null;
-}
 
 function decodeHtmlEntities(s: string): string {
   return s
@@ -164,75 +120,91 @@ function findContinuationTokens(data: unknown): string[] {
   return [...new Set(tokens)];
 }
 
-/** Fetch a continuation page from YouTube's innertube browse API. */
+/** POST to innertube browse API. */
+async function innertubeBrowse(body: Record<string, unknown>): Promise<any> {
+  const res = await fetch(
+    `https://www.youtube.com/youtubei/v1/browse?key=${INNERTUBE_KEY}&prettyPrint=false`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "User-Agent": UA },
+      body: JSON.stringify({ context: INNERTUBE_CONTEXT, ...body }),
+    }
+  );
+  if (!res.ok) throw new Error(`Innertube API HTTP ${res.status}`);
+  return res.json();
+}
+
+/** Fetch a continuation page. */
 async function fetchContinuation(
   token: string
 ): Promise<{ videos: VideoInfo[]; nextTokens: string[] }> {
   try {
-    const res = await fetch(
-      `https://www.youtube.com/youtubei/v1/browse?key=${INNERTUBE_KEY}&prettyPrint=false`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "User-Agent": UA },
-        body: JSON.stringify({ context: INNERTUBE_CONTEXT, continuation: token }),
-      }
-    );
-    if (!res.ok) return { videos: [], nextTokens: [] };
-    const data = await res.json();
+    const data = await innertubeBrowse({ continuation: token });
     return { videos: extractVideos(data), nextTokens: findContinuationTokens(data) };
   } catch {
     return { videos: [], nextTokens: [] };
   }
 }
 
+/** Collect all videos by following continuation tokens. */
+async function collectAllVideos(initialData: any): Promise<VideoInfo[]> {
+  const allVideos = extractVideos(initialData);
+  let tokens = findContinuationTokens(initialData);
+  let iterations = 0;
+
+  while (tokens.length > 0 && iterations < 50) {
+    iterations++;
+    const { videos: more, nextTokens } = await fetchContinuation(tokens[0]);
+    if (more.length === 0) break;
+    const ids = new Set(allVideos.map((v) => v.id));
+    for (const v of more) if (!ids.has(v.id)) allVideos.push(v);
+    tokens = nextTokens;
+  }
+
+  return allVideos;
+}
+
 // ---------------------------------------------------------------------------
-// Channel videos
+// Resolve channel URL → browseId (pure innertube, no HTML)
 // ---------------------------------------------------------------------------
 
-export async function fetchChannelVideos(channelUrl: string): Promise<VideoInfo[]> {
+async function resolveChannelId(channelUrl: string): Promise<string> {
   let url = channelUrl.trim().replace(/\/$/, "");
-  // Strip existing tab paths
   url = url.replace(
     /\/(videos|shorts|streams|playlists|community|channels|about|featured)\/?$/,
     ""
   );
-  url += "/videos";
 
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent": UA,
-      "Accept-Language": "en-US,en;q=0.9",
-      Accept: "text/html,application/xhtml+xml",
-    },
-    redirect: "follow",
+  const res = await fetch(
+    `https://www.youtube.com/youtubei/v1/navigation/resolve_url?key=${INNERTUBE_KEY}&prettyPrint=false`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "User-Agent": UA },
+      body: JSON.stringify({ context: INNERTUBE_CONTEXT, url }),
+    }
+  );
+
+  if (!res.ok) throw new Error(`Failed to resolve channel: HTTP ${res.status}`);
+  const data = await res.json();
+  const browseId = data?.endpoint?.browseEndpoint?.browseId;
+  if (!browseId) throw new Error("Could not resolve channel URL");
+  return browseId;
+}
+
+// ---------------------------------------------------------------------------
+// Channel videos (pure innertube JSON API — no HTML scraping)
+// ---------------------------------------------------------------------------
+
+export async function fetchChannelVideos(channelUrl: string): Promise<VideoInfo[]> {
+  const browseId = await resolveChannelId(channelUrl);
+
+  // params "EgZ2aWRlb3PyBgQKAjoA" = Videos tab, sorted by date
+  const data = await innertubeBrowse({
+    browseId,
+    params: "EgZ2aWRlb3PyBgQKAjoA",
   });
 
-  if (!res.ok) throw new Error(`Failed to fetch channel: HTTP ${res.status}`);
-  const html = await res.text();
-
-  const initialData = extractJsonFromHtml(html, "ytInitialData");
-  if (!initialData) throw new Error("Could not parse YouTube channel data");
-
-  const allVideos = extractVideos(initialData);
-
-  // Follow continuations to fetch ALL videos
-  let tokens = findContinuationTokens(initialData);
-  let iterations = 0;
-  while (tokens.length > 0 && iterations < 100) {
-    iterations++;
-    const { videos: more, nextTokens } = await fetchContinuation(tokens[0]);
-    if (more.length === 0) break;
-
-    const existingIds = new Set(allVideos.map((v) => v.id));
-    for (const v of more) {
-      if (!existingIds.has(v.id)) {
-        allVideos.push(v);
-        existingIds.add(v.id);
-      }
-    }
-    tokens = nextTokens;
-    await new Promise((r) => setTimeout(r, 300));
-  }
+  const allVideos = await collectAllVideos(data);
 
   if (allVideos.length === 0) {
     throw new Error("No videos found on this channel");
@@ -241,48 +213,15 @@ export async function fetchChannelVideos(channelUrl: string): Promise<VideoInfo[
 }
 
 // ---------------------------------------------------------------------------
-// Playlist videos
+// Playlist videos (pure innertube JSON API)
 // ---------------------------------------------------------------------------
 
 export async function fetchPlaylistVideos(playlistUrl: string): Promise<VideoInfo[]> {
   const listMatch = playlistUrl.match(/[?&]list=([\w-]+)/);
   if (!listMatch) throw new Error("Could not extract playlist ID from URL");
 
-  const res = await fetch(playlistUrl, {
-    headers: {
-      "User-Agent": UA,
-      "Accept-Language": "en-US,en;q=0.9",
-      Accept: "text/html,application/xhtml+xml",
-    },
-    redirect: "follow",
-  });
-
-  if (!res.ok) throw new Error(`Failed to fetch playlist: HTTP ${res.status}`);
-  const html = await res.text();
-
-  const match = html.match(/var\s+ytInitialData\s*=\s*(\{[\s\S]+?\});\s*<\/script>/);
-  if (!match) throw new Error("Could not parse playlist data");
-
-  let data: unknown;
-  try {
-    data = JSON.parse(match[1]);
-  } catch {
-    throw new Error("Failed to parse playlist JSON");
-  }
-
-  const allVideos = extractVideos(data);
-
-  let tokens = findContinuationTokens(data);
-  let iterations = 0;
-  while (tokens.length > 0 && iterations < 100) {
-    iterations++;
-    const { videos: more, nextTokens } = await fetchContinuation(tokens[0]);
-    if (more.length === 0) break;
-    const ids = new Set(allVideos.map((v) => v.id));
-    for (const v of more) if (!ids.has(v.id)) allVideos.push(v);
-    tokens = nextTokens;
-    await new Promise((r) => setTimeout(r, 300));
-  }
+  const data = await innertubeBrowse({ browseId: `VL${listMatch[1]}` });
+  const allVideos = await collectAllVideos(data);
 
   if (allVideos.length === 0) throw new Error("No videos found in this playlist");
   return allVideos;
@@ -317,7 +256,6 @@ export async function extractTranscript(
   videoId: string
 ): Promise<{ transcript: string | null; error?: string }> {
   try {
-    // Use the Android innertube player API to get caption track URLs
     const playerRes = await fetch(
       "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
       {
@@ -365,7 +303,6 @@ export async function extractTranscript(
     const pRegex = /<p\s+t="\d+"\s+d="\d+"[^>]*>([\s\S]*?)<\/p>/g;
     let m: RegExpExecArray | null;
     while ((m = pRegex.exec(xml)) !== null) {
-      // Extract text from <s> sub-elements if present, otherwise use raw content
       let text = "";
       const sRegex = /<s[^>]*>([^<]*)<\/s>/g;
       let s: RegExpExecArray | null;
