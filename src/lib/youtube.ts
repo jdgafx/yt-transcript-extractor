@@ -31,6 +31,50 @@ const INNERTUBE_CONTEXT = {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Extract a JSON object from HTML by finding the variable assignment
+ * and counting braces. Much faster and safer than regex on ~1MB HTML.
+ */
+function extractJsonFromHtml(html: string, varName: string): any {
+  const needle = `var ${varName} = `;
+  const start = html.indexOf(needle);
+  if (start === -1) return null;
+
+  const jsonStart = start + needle.length;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+
+  for (let i = jsonStart; i < html.length; i++) {
+    const ch = html[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escape = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        try {
+          return JSON.parse(html.slice(jsonStart, i + 1));
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
+}
+
 function decodeHtmlEntities(s: string): string {
   return s
     .replace(/&#39;/g, "'")
@@ -166,15 +210,8 @@ export async function fetchChannelVideos(channelUrl: string): Promise<VideoInfo[
   if (!res.ok) throw new Error(`Failed to fetch channel: HTTP ${res.status}`);
   const html = await res.text();
 
-  const match = html.match(/var\s+ytInitialData\s*=\s*(\{[\s\S]+?\});\s*<\/script>/);
-  if (!match) throw new Error("Could not parse YouTube channel data");
-
-  let initialData: unknown;
-  try {
-    initialData = JSON.parse(match[1]);
-  } catch {
-    throw new Error("Failed to parse YouTube data JSON");
-  }
+  const initialData = extractJsonFromHtml(html, "ytInitialData");
+  if (!initialData) throw new Error("Could not parse YouTube channel data");
 
   const allVideos = extractVideos(initialData);
 
