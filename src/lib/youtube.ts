@@ -249,20 +249,20 @@ export async function getVideoTitle(videoId: string): Promise<string> {
 // Transcript extraction via Android innertube player API
 // ---------------------------------------------------------------------------
 
-const ANDROID_UA = "com.google.android.youtube/20.10.38 (Linux; U; Android 14)";
-const ANDROID_CLIENT = { clientName: "ANDROID", clientVersion: "20.10.38" };
+const IOS_UA = "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X)";
+const IOS_CLIENT = { clientName: "IOS", clientVersion: "20.10.4" };
 
 export async function extractTranscript(
   videoId: string
 ): Promise<{ transcript: string | null; error?: string }> {
   try {
     const playerRes = await fetch(
-      "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
+      `https://www.youtube.com/youtubei/v1/player?key=${INNERTUBE_KEY}&prettyPrint=false`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json", "User-Agent": ANDROID_UA },
+        headers: { "Content-Type": "application/json", "User-Agent": IOS_UA },
         body: JSON.stringify({
-          context: { client: ANDROID_CLIENT },
+          context: { client: IOS_CLIENT },
           videoId,
         }),
       }
